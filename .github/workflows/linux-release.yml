@@ -22,7 +22,7 @@ jobs:
 
       - name: Replace new_api with x_api
         run: |
-          find . -type f -exec sed -i 's/new_api/x_api/g' {} +
+          find . -type f -exec sed -i -e 's/new_api/x_api/g' -e 's/new-api/x-api/g' {} +
 
       - name: Build Frontend
         env:
