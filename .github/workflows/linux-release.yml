@@ -22,7 +22,7 @@ jobs:
 
       - name: Replace new_api with x_api
         run: |
-          find . -type f -exec sed -i -e 's/new_api/x_api/g' -e 's/new-api/x-api/g' {} +
+          find . -type f -exec sed -i -e 's/new_api/x_api/g' -e 's/new api/x api/g' -e 's/new-api/x-api/g' {} +
 
       - name: Build Frontend
         env:
@@ -41,13 +41,13 @@ jobs:
       - name: Build Backend (amd64)
         run: |
           go mod download
-          go build -ldflags "-s -w -X 'x-api/common.Version=$(git describe --tags)' -extldflags '-static'" -o x-api
+          go build -ldflags "-s -w -X 'x-api/common.Version=$(git describe --tags)' -X 'x-api/common.BuildTime=$(date -u '+%Y-%m-%dT%H:%M:%SZ')' -extldflags '-static'" -o x-api
 
       - name: Build Backend (arm64)
         run: |
           sudo apt-get update
           sudo apt-get install gcc-aarch64-linux-gnu
-          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'x-api/common.Version=$(git describe --tags)' -extldflags '-static'" -o x-api-arm64
+          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'x-api/common.Version=$(git describe --tags)' -X 'x-api/common.BuildTime=$(date -u '+%Y-%m-%dT%H:%M:%SZ')' -extldflags '-static'" -o x-api-arm64
 
       - name: Release
         uses: softprops/action-gh-release@v1
