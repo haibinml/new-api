@@ -30,6 +30,60 @@ type MessageImageUrl struct {
 }
 
 const (
+	ContentTypeText     = "text"
+	ContentTypeImageURL = "image_url"
+)
+
+func (m Message) ParseContent() []MediaMessage {
+	var contentList []MediaMessage
+	var stringContent string
+	if err := json.Unmarshal(m.Content, &stringContent); err == nil {
+		contentList = append(contentList, MediaMessage{
+			Type: ContentTypeText,
+			Text: stringContent,
+		})
+		return contentList
+	}
+	var arrayContent []json.RawMessage
+	if err := json.Unmarshal(m.Content, &arrayContent); err == nil {
+		for _, contentItem := range arrayContent {
+			var contentMap map[string]any
+			if err := json.Unmarshal(contentItem, &contentMap); err != nil {
+				continue
+			}
+			switch contentMap["type"] {
+			case ContentTypeText:
+				if subStr, ok := contentMap["text"].(string); ok {
+					contentList = append(contentList, MediaMessage{
+						Type: ContentTypeText,
+						Text: subStr,
+					})
+				}
+			case ContentTypeImageURL:
+				if subObj, ok := contentMap["image_url"].(map[string]any); ok {
+					detail, ok := subObj["detail"]
+					if ok {
+						subObj["detail"] = detail.(string)
+					} else {
+						subObj["detail"] = "auto"
+					}
+					contentList = append(contentList, MediaMessage{
+						Type: ContentTypeImageURL,
+						ImageUrl: MessageImageUrl{
+							Url:    subObj["url"].(string),
+							Detail: subObj["detail"].(string),
+						},
+					})
+				}
+			}
+		}
+		return contentList
+	}
+
+	return nil
+}
+
+const (
 	RelayModeUnknown = iota
 	RelayModeChatCompletions
 	RelayModeCompletions
@@ -41,26 +95,41 @@ const (
 	RelayModeMidjourneyDescribe
 	RelayModeMidjourneyBlend
 	RelayModeMidjourneyChange
+	RelayModeMidjourneySimpleChange
 	RelayModeMidjourneyNotify
 	RelayModeMidjourneyTaskFetch
-	RelayModeAudio
+	RelayModeMidjourneyTaskFetchByCondition
+	RelayModeAudioSpeech
+	RelayModeAudioTranscription
+	RelayModeAudioTranslation
 )
 
 // https://platform.openai.com/docs/api-reference/chat
 
+type ResponseFormat struct {
+	Type string `json:"type,omitempty"`
+}
+
 type GeneralOpenAIRequest struct {
-	Model       string    `json:"model,omitempty"`
-	Messages    []Message `json:"messages,omitempty"`
-	Prompt      any       `json:"prompt,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
-	MaxTokens   uint      `json:"max_tokens,omitempty"`
-	Temperature float64   `json:"temperature,omitempty"`
-	TopP        float64   `json:"top_p,omitempty"`
-	N           int       `json:"n,omitempty"`
-	Input       any       `json:"input,omitempty"`
-	Instruction string    `json:"instruction,omitempty"`
-	Size        string    `json:"size,omitempty"`
-	Functions   any       `json:"functions,omitempty"`
+	Model            string          `json:"model,omitempty"`
+	Messages         []Message       `json:"messages,omitempty"`
+	Prompt           any             `json:"prompt,omitempty"`
+	Stream           bool            `json:"stream,omitempty"`
+	MaxTokens        uint            `json:"max_tokens,omitempty"`
+	Temperature      float64         `json:"temperature,omitempty"`
+	TopP             float64         `json:"top_p,omitempty"`
+	N                int             `json:"n,omitempty"`
+	Input            any             `json:"input,omitempty"`
+	Instruction      string          `json:"instruction,omitempty"`
+	Size             string          `json:"size,omitempty"`
+	Functions        any             `json:"functions,omitempty"`
+	FrequencyPenalty float64         `json:"frequency_penalty,omitempty"`
+	PresencePenalty  float64         `json:"presence_penalty,omitempty"`
+	ResponseFormat   *ResponseFormat `json:"response_format,omitempty"`
+	Seed             float64         `json:"seed,omitempty"`
+	Tools            any             `json:"tools,omitempty"`
+	ToolChoice       any             `json:"tool_choice,omitempty"`
+	User             string          `json:"user,omitempty"`
 }
 
 func (r GeneralOpenAIRequest) ParseInput() []string {
@@ -209,6 +278,7 @@ type MidjourneyRequest struct {
 	State       string   `json:"state"`
 	TaskId      string   `json:"taskId"`
 	Base64Array []string `json:"base64Array"`
+	Content     string   `json:"content"`
 }
 
 type MidjourneyResponse struct {
@@ -234,14 +304,22 @@ func Relay(c *gin.Context) {
 		relayMode = RelayModeImagesGenerations
 	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/edits") {
 		relayMode = RelayModeEdits
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio") {
-		relayMode = RelayModeAudio
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/speech") {
+		relayMode = RelayModeAudioSpeech
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/transcriptions") {
+		relayMode = RelayModeAudioTranscription
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/translations") {
+		relayMode = RelayModeAudioTranslation
 	}
 	var err *OpenAIErrorWithStatusCode
 	switch relayMode {
 	case RelayModeImagesGenerations:
 		err = relayImageHelper(c, relayMode)
-	case RelayModeAudio:
+	case RelayModeAudioSpeech:
+		fallthrough
+	case RelayModeAudioTranslation:
+		fallthrough
+	case RelayModeAudioTranscription:
 		err = relayAudioHelper(c, relayMode)
 	default:
 		err = relayTextHelper(c, relayMode)
@@ -288,14 +366,19 @@ func RelayMidjourney(c *gin.Context) {
 		relayMode = RelayModeMidjourneyNotify
 	} else if strings.HasPrefix(c.Request.URL.Path, "/mj/submit/change") {
 		relayMode = RelayModeMidjourneyChange
-	} else if strings.HasPrefix(c.Request.URL.Path, "/mj/task") {
+	} else if strings.HasPrefix(c.Request.URL.Path, "/mj/submit/simple-change") {
+		relayMode = RelayModeMidjourneyChange
+	} else if strings.HasSuffix(c.Request.URL.Path, "/fetch") {
 		relayMode = RelayModeMidjourneyTaskFetch
+	} else if strings.HasSuffix(c.Request.URL.Path, "/list-by-condition") {
+		relayMode = RelayModeMidjourneyTaskFetchByCondition
 	}
+
 	var err *MidjourneyResponse
 	switch relayMode {
 	case RelayModeMidjourneyNotify:
 		err = relayMidjourneyNotify(c)
-	case RelayModeMidjourneyTaskFetch:
+	case RelayModeMidjourneyTaskFetch, RelayModeMidjourneyTaskFetchByCondition:
 		err = relayMidjourneyTask(c, relayMode)
 	default:
 		err = relayMidjourneySubmit(c, relayMode)

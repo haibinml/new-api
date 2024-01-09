@@ -17,7 +17,7 @@ func SetRelayRouter(router *gin.Engine) {
 		modelsRouter.GET("/:model", controller.RetrieveModel)
 	}
 	relayV1Router := router.Group("/v1")
-	relayV1Router.Use(middleware.TokenAuth(), middleware.Distribute())
+	relayV1Router.Use(middleware.RelayPanicRecover(), middleware.TokenAuth(), middleware.Distribute())
 	{
 		relayV1Router.POST("/completions", controller.Relay)
 		relayV1Router.POST("/chat/completions", controller.Relay)
@@ -49,10 +49,12 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		relayMjRouter.POST("/submit/imagine", controller.RelayMidjourney)
 		relayMjRouter.POST("/submit/change", controller.RelayMidjourney)
+		relayMjRouter.POST("/submit/simple-change", controller.RelayMidjourney)
 		relayMjRouter.POST("/submit/describe", controller.RelayMidjourney)
 		relayMjRouter.POST("/submit/blend", controller.RelayMidjourney)
 		relayMjRouter.POST("/notify", controller.RelayMidjourney)
 		relayMjRouter.GET("/task/:id/fetch", controller.RelayMidjourney)
+		relayMjRouter.POST("/task/list-by-condition", controller.RelayMidjourney)
 	}
 	//relayMjRouter.Use()
 }
